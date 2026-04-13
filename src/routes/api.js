@@ -91,4 +91,76 @@ router.post('/pots', express.json(), (req, res) => {
   });
 });
 
+// Bug #4: off-by-one — uses <= instead of <, so a pot closing TODAY is already closed.
+function isPotClosed(closingDate) {
+  const today = new Date().toISOString().slice(0, 10);
+  return closingDate <= today;
+}
+
+router.get('/pots/:id/contributions', (req, res) => {
+  const pot = db.prepare('SELECT id FROM pots WHERE id = ?').get(req.params.id);
+  if (!pot) return res.status(404).json({ error: 'not found' });
+
+  // Bug #5: returns in insertion order, but UI claims "most recent first".
+  const rows = db
+    .prepare('SELECT * FROM contributions WHERE pot_id = ? ORDER BY id ASC')
+    .all(pot.id);
+  res.json(
+    rows.map((c) => ({
+      id: c.id,
+      contributorName: c.contributor_name,
+      amountCents: c.amount,
+      cardLast4: c.card_last4,
+      createdAt: c.created_at,
+    }))
+  );
+});
+
+router.post('/pots/:id/contributions', express.json(), (req, res) => {
+  const pot = db.prepare('SELECT * FROM pots WHERE id = ?').get(req.params.id);
+  if (!pot) return res.status(404).json({ error: 'not found' });
+
+  const { contributorName, amount, cardNumber } = req.body || {};
+  if (!contributorName || amount === undefined || !cardNumber) {
+    return res
+      .status(400)
+      .json({ error: 'contributorName, amount, cardNumber are required' });
+  }
+  if (typeof cardNumber !== 'string' || !/^\d{16}$/.test(cardNumber)) {
+    return res.status(400).json({ error: 'cardNumber must be 16 digits' });
+  }
+  if (cardNumber === '4000000000000002') {
+    return res.status(402).json({ error: 'payment declined' });
+  }
+
+  // Bug #1 INTENTIONALLY MISSING: no check against isPotClosed(pot.closing_date).
+  // The API accepts contributions on closed pots even though the UI hides the form.
+  // DO NOT ADD A CHECK HERE.
+
+  // Bug #2 INTENTIONALLY MISSING: no `amount > 0` validation.
+  // Negative amounts are accepted and reduce the pot total.
+  // DO NOT ADD A CHECK HERE.
+
+  const cents = Math.round(Number(amount) * 100);
+  const last4 = cardNumber.slice(-4);
+  const info = db
+    .prepare(
+      'INSERT INTO contributions (pot_id, contributor_name, amount, card_last4) VALUES (?, ?, ?, ?)'
+    )
+    .run(pot.id, contributorName, cents, last4);
+
+  res.status(201).json({
+    id: info.lastInsertRowid,
+    potId: pot.id,
+    contributorName,
+    amountCents: cents,
+    cardLast4: last4,
+  });
+});
+
+router.post('/_reset', (req, res) => {
+  reset();
+  res.json({ status: 'reset' });
+});
+
 module.exports = router;
