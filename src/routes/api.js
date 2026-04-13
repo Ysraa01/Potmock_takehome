@@ -59,4 +59,36 @@ router.get('/pots/:id', (req, res) => {
 });
 
 // Remaining routes added in Tasks 4 and 5
+
+router.post('/pots', express.json(), (req, res) => {
+  const { title, eventType, closingDate, recipientName } = req.body || {};
+  if (!title || !eventType || !closingDate || !recipientName) {
+    return res
+      .status(400)
+      .json({ error: 'title, eventType, closingDate, recipientName are required' });
+  }
+  const allowed = ['birthday', 'wedding', 'honeymoon', 'retirement', 'other'];
+  if (!allowed.includes(eventType)) {
+    return res.status(400).json({ error: 'invalid eventType' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(closingDate)) {
+    return res.status(400).json({ error: 'closingDate must be YYYY-MM-DD' });
+  }
+  const info = db
+    .prepare(
+      'INSERT INTO pots (title, event_type, closing_date, recipient_name) VALUES (?, ?, ?, ?)'
+    )
+    .run(title, eventType, closingDate, recipientName);
+  const row = db.prepare('SELECT * FROM pots WHERE id = ?').get(info.lastInsertRowid);
+  res.status(201).json({
+    id: row.id,
+    title: row.title,
+    eventType: row.event_type,
+    closingDate: row.closing_date,
+    recipientName: row.recipient_name,
+    createdAt: row.created_at,
+    totalCents: 0,
+  });
+});
+
 module.exports = router;
