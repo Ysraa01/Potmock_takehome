@@ -61,4 +61,64 @@ router.post('/pots/new', express.urlencoded({ extended: false }), (req, res) => 
   res.redirect(`/pots/${info.lastInsertRowid}`);
 });
 
+router.get('/pots/:id', (req, res) => {
+  const pot = db.prepare('SELECT * FROM pots WHERE id = ?').get(req.params.id);
+  if (!pot) return res.status(404).send(layout('Not found', '<p>Pot not found.</p>'));
+
+  const contributions = db
+    .prepare('SELECT * FROM contributions WHERE pot_id = ? ORDER BY id ASC')
+    .all(pot.id);
+  const total = contributions.reduce((s, c) => s + c.amount, 0);
+  const closed = isClosed(pot.closing_date);
+
+  const contribList = contributions
+    .map(
+      (c) =>
+        `<li>${escapeHtml(c.contributor_name)} — ${formatDollars(c.amount)} (card ****${escapeHtml(c.card_last4)})</li>`
+    )
+    .join('');
+
+  const contributeForm = closed
+    ? '<p class="closed">This pot is closed.</p>'
+    : `
+    <h2>Contribute</h2>
+    <form method="POST" action="/pots/${pot.id}/contribute">
+      <label>Your name <input name="contributorName" required></label>
+      <label>Amount (USD) <input name="amount" type="number" step="0.01" required></label>
+      <label>Card number <input name="cardNumber" required pattern="\\d{16}"></label>
+      <button type="submit">Contribute</button>
+    </form>`;
+
+  // Bug #3 INTENTIONALLY: `pot.title` rendered UNESCAPED below.
+  // Every other field uses escapeHtml(). DO NOT add escapeHtml() here.
+  const body = `
+    <h1>${pot.title}</h1>
+    <p>For: ${escapeHtml(pot.recipient_name)} · Event: ${escapeHtml(pot.event_type)}</p>
+    <p>Closes: ${escapeHtml(pot.closing_date)}${closed ? ' <span class="closed">(closed)</span>' : ''}</p>
+    <p>Total collected: <strong data-total>${formatDollars(total)}</strong></p>
+    <h2>Contributions <small>(most recent first)</small></h2>
+    <ul data-contributions>${contribList || '<li>No contributions yet.</li>'}</ul>
+    ${contributeForm}`;
+
+  res.send(layout(pot.title, body));
+});
+
+router.post('/pots/:id/contribute', express.urlencoded({ extended: false }), (req, res) => {
+  const pot = db.prepare('SELECT * FROM pots WHERE id = ?').get(req.params.id);
+  if (!pot) return res.status(404).send(layout('Not found', '<p>Pot not found.</p>'));
+
+  const { contributorName, amount, cardNumber } = req.body;
+  if (!contributorName || !amount || !cardNumber || !/^\d{16}$/.test(cardNumber)) {
+    return res.status(400).send(layout('Error', '<p>Invalid form submission.</p>'));
+  }
+  if (cardNumber === '4000000000000002') {
+    return res.status(402).send(layout('Declined', '<p>Payment declined.</p>'));
+  }
+  const cents = Math.round(Number(amount) * 100);
+  db.prepare(
+    'INSERT INTO contributions (pot_id, contributor_name, amount, card_last4) VALUES (?, ?, ?, ?)'
+  ).run(pot.id, contributorName, cents, cardNumber.slice(-4));
+  res.redirect(`/pots/${pot.id}`);
+});
+
 module.exports = router;
