@@ -1,0 +1,19 @@
+{
+  "name": "potmock",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Intentionally buggy mock app for QA automation take-home exercise",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "supertest": "^7.0.0"
+  }
+}
